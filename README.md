@@ -360,6 +360,84 @@ python3 scatter.py
 
 ---
 
+## Troubleshooting
+
+This tutorial was built by actually hitting every bug below — they're the real failure modes, in the order you'll meet them.
+
+### 1. Empty answers, `finish_reason: "length"`, parser crashes on `None`
+
+**Symptom:** the model returns nothing (or gets cut off mid-sentence), and your parser throws `AttributeError: 'NoneType' object has no attribute 'group'`.
+
+**Cause:** reasoning models emit hidden thinking (`reasoning_content`) *before* the visible answer — and that thinking counts against `max_tokens`. A budget of 2048 gets eaten by thinking; the answer never gets written.
+
+**Fix:** raise `MAX_TOKENS` (8192 is a safe starting point). Measure your chains' actual usage and tune from there.
+
+### 2. The vote says `4` when the answer is `44`
+
+**Symptom:** silently wrong results — the most dangerous kind. No crash, just wrong.
+
+**Cause:** greedy regex. `r'Answer:.*(\d+)'` — the `.*` matches as much as possible, so `(\d+)` is left only the *last single digit*. Lazy `.*?` fixes it: `r'Answer:.*?(\d+)'`.
+
+### 3. `max(areas, areas.get)` → `TypeError`
+
+**Cause:** `max(a, b)` compares two values; you passed a dict and a method. The `key=` argument tells max *how to score*: `max(areas, key=areas.get)`.
+
+### 4. `find('Answer:', -1)` never matches
+
+**Cause:** `str.find(sub, start)` — the second argument is a *starting position*, not "search from the end." `-1` as a start means "start at the last character." Use `rfind` for last-occurrence, or just use regex.
+
+### 5. HTTP 502 / connection errors mid-run
+
+**Symptom:** the experiment dies partway with `HTTPError: Bad Gateway`.
+
+**Cause:** the serving process (llama.cpp / llama-swap / vLLM) restarted or reloaded mid-request — commonly because *you* edited its config, or the model was unloaded for VRAM. The 502 is the server saying "I was busy changing."
+
+**Fix:** finish your config edits *before* starting the run; re-run after the server settles. (We hit this one live — the first run lost its last problem to a config reload.)
+
+### 6. `re.search` matches but `group(1)` is the wrong number
+
+**Symptom:** the parse returns a number from the reasoning text instead of the final answer.
+
+**Cause:** the model wrote `Answer:` but the regex grabbed digits elsewhere. Make the prompt demand the answer on the final line, and keep the lazy pattern anchored to the marker. In production, constrain the output format (JSON / structured output) so parsing is trivial.
+
+### 7. Same output every time, voting does nothing
+
+**Cause:** `temperature=0.0` — greedy decoding is deterministic; N samples are N copies of the same opinion. The vote needs diversity: `SC_TEMPERATURE` must be > 0.
+
+---
+
+## How this tutorial was built
+
+This repo started as a live tutoring session: one person learning Chain of Thought from zero, writing every line themselves, with an AI coach. The bugs in the Troubleshooting section weren't invented — they're the actual bugs hit during that session, including:
+
+- the greedy-regex `4` vs `44` bug (found because the vote said "4")
+- the `max_tokens` reasoning-budget trap (found because chains came back empty)
+- the 502 on config reload (found because the experiment died on its last problem)
+- the download-filename fiasco (three attempts before the right file name matched)
+
+The tutorial keeps them because **the debugging is the education.** If you hit a bug not listed here, open an issue — the session that built this is proof that hitting bugs is the point.
+
+---
+
+## References
+
+- **Chain-of-Thought Prompting Elicits Reasoning in Large Language Models** — Wei et al., 2022. The origin paper: few-shot rationales unlock math/commonsense reasoning in large models.
+- **Large Language Models are Zero-Shot Reasoners** — Kojima et al., 2022. "Let's think step by step" — CoT without examples.
+- **Self-Consistency Improves Chain of Thought Reasoning in Language Models** — Wang et al., 2022. The paper this tutorial implements: sample N chains, majority vote.
+- **STaR: Bootstrapping Reasoning With Reasoning** — Zelikman et al., 2022. Generate rationales, fine-tune on the correct ones.
+- **Tree of Thoughts: Deliberate Problem Solving with Large Language Models** — Yao et al., 2023. Search over steps, not just one chain.
+- **DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning** — DeepSeek-AI, 2025. GRPO, the "aha moment," and the distilled reasoning models many people run locally.
+- **Condorcet's jury theorem** (1785) — the mathematics behind why voting works: a group of slightly-better-than-random voters becomes near-certain as it grows.
+
+---
+
+## Acknowledgements
+
+- Built and tested against [llama.cpp](https://github.com/ggerganov/llama.cpp) and [llama-swap](https://github.com/mostlygeek/llama-swap) serving local models (Gemma 4 12B and Qwen 3 4B) — no cloud API required for the whole tutorial.
+- The eval problems are original (written for this tutorial) to avoid copyright issues with benchmark sets.
+
+---
+
 ## License
 
 MIT — use it, learn from it, build on it.
