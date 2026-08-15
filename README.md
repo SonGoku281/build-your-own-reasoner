@@ -250,7 +250,16 @@ for i, (problem, truth) in enumerate(PROBLEMS, 1):
 - `votes={'44': 3, '42': 2}` — the scatter! Majority saved the day
 - `votes={'44': 3, '42': 2}` where the winner is *wrong* — consensus on wrongness (rare; the failure mode voting can't fix)
 
-Expect self-consistency to meet or beat greedy — and on *harder* problems, the gap grows. (On easy problems a strong model may nail both; that's a finding too — it means the problems are too easy, not that voting is useless. Try nastier problems.)
+### The model-size lesson
+
+The interesting experiment isn't just one model — it's **two models of very different sizes**. Here's why: self-consistency fixes *mistakes*, and small models make more mistakes.
+
+| Model | Expectation |
+|---|---|
+| Large (12B+) | Both greedy and SC nail easy problems → no gap. The problems are too easy; voting has nothing to fix. |
+| Small (3-4B) | Greedy stumbles on multi-step problems → SC's majority vote recovers → **the gap appears**. |
+
+This is the honest finding from running this tutorial: **voting buys the most exactly where the model is weakest.** On a strong model with easy problems, the delta is zero — which isn't a failure of the method, it's a measurement of the problem set. To see the method shine, give the small model hard problems.
 
 ---
 
@@ -301,10 +310,28 @@ The deepest reframe: **the LLM has no memory — your code builds its context fr
   - OpenAI / any hosted API (change the `base_url` and `model`)
 - A model that can do arithmetic (a 7B+ instruct model works; reasoning models work great but need the bigger `max_tokens`)
 
+### Configuration
+
+All settings live in `.env` — nothing is hardcoded. Copy the example and edit:
+
+```bash
+cp .env.example .env
+# edit: BASE_URL, MODEL, MAX_TOKENS, SC_SAMPLES, SC_TEMPERATURE, ...
+```
+
+| Setting | Default | What it controls |
+|---|---|---|
+| `BASE_URL` | `http://localhost:8081/v1` | Your OpenAI-compatible endpoint |
+| `MODEL` | `gemma-4-12b-v2` | Which model to query |
+| `MAX_TOKENS` | `8192` | Budget per completion — reasoning models think *before* they answer, and thinking counts against this |
+| `SC_TEMPERATURE` | `0.9` | Diversity for the vote (must be > 0) |
+| `SC_SAMPLES` | `5` | Chains per problem for the vote |
+| `GREEDY_TEMPERATURE` | `0.0` | Deterministic baseline |
+
 ### Run
 
 ```bash
-# 1. point ask_llm at your endpoint (base_url + model)
+# 1. point .env at your endpoint (BASE_URL + MODEL)
 # 2. run the scatter experiment (temperature lesson):
 python3 -c "
 from scatter import ask_llm
@@ -320,6 +347,8 @@ python3 scatter.py
 | File | What it is |
 |---|---|
 | `scatter.py` | The complete reasoner: generator, parser, aggregator, verifier, experiment |
+| `config.py` | Dependency-free `.env` loader — every knob is configurable |
+| `.env.example` | All configuration knobs, documented |
 | `problems.py` | 14 word problems with exact answers (the eval set — extend it!) |
 
 ### Ideas to take it further
