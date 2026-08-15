@@ -22,6 +22,7 @@ Usage:
 
 import json
 import re
+import urllib.error
 import urllib.request
 from collections import Counter
 
@@ -35,8 +36,15 @@ End your response with exactly: Answer: <number>.
 Nothing after that line."""
 
 
-def ask_llm(prompt: str, temperature: float) -> str:
-    """One completion call against the configured endpoint."""
+def ask_llm(prompt: str, temperature: float, retries: int = 3) -> str:
+    """One completion call against the configured endpoint.
+
+    Retries transient 5xx errors (502/503) with exponential backoff — the
+    serving process (llama-swap / vLLM) can reload mid-request, and a robust
+    client must survive that instead of dying.
+    """
+    import time
+
     payload = {
         "model": config.MODEL,
         "messages": [{"role": "user", "content": prompt}],
@@ -44,14 +52,22 @@ def ask_llm(prompt: str, temperature: float) -> str:
         "max_tokens": config.MAX_TOKENS,
         "stream": False,
     }
-    req = urllib.request.Request(
-        f"{config.BASE_URL}/chat/completions",
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=config.REQUEST_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode())
-    return data["choices"][0]["message"]["content"]
+    body = json.dumps(payload).encode()
+    url = f"{config.BASE_URL}/chat/completions"
+
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(
+                url, data=body, headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=config.REQUEST_TIMEOUT) as resp:
+                data = json.loads(resp.read().decode())
+            return data["choices"][0]["message"]["content"]
+        except urllib.error.HTTPError as e:
+            if e.code < 500 or attempt == retries - 1:
+                raise
+            time.sleep(2 ** attempt)  # 1s, 2s, 4s...
+    raise RuntimeError("unreachable")
 
 
 # ── 2. PARSER — extract the number from free-form prose ───────────────────
